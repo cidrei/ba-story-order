@@ -6,7 +6,7 @@
     <title>Story Timeline</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
-        body { font-family: sans-serif; background: #1e1e1e; color: #eee; padding: 20px; max-width: 900px; margin: auto; }
+        body { font-family: sans-serif; background: #1e1e1e; color: #eee; padding: 20px; max-width: 950px; margin: auto; }
         
         /* Controls & Filters */
         .controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 15px; }
@@ -24,7 +24,7 @@
         .timeline { padding-top: 10px; }
         .timeline-row { 
             display: grid; 
-            grid-template-columns: 110px 1fr; 
+            grid-template-columns: 150px 1fr; 
             gap: 20px; 
             margin-bottom: 15px; 
             align-items: start; 
@@ -32,7 +32,7 @@
         
         .timeline-date { 
             color: #888; 
-            font-size: 0.9em; 
+            font-size: 0.85em; 
             text-align: right; 
             padding-top: 12px; 
             font-family: monospace; 
@@ -101,6 +101,36 @@
 
         const palette = ['#007bff', '#28a745', '#dc3545', '#ffc107', '#17a2b8', '#e83e8c', '#fd7e14', '#6610f2', '#20c997'];
 
+        // Helper to format dates to "January 01, 2026"
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            const parts = dateStr.trim().split(/[-/.]/);
+            
+            let y, m, d;
+            if (parts.length === 3) {
+                if (parts[0].length === 4) {
+                    [y, m, d] = parts.map(Number);
+                } else if (parts[2].length === 4) {
+                    [m, d, y] = parts.map(Number);
+                }
+                if (y && m && d && !isNaN(y) && !isNaN(m) && !isNaN(d)) {
+                    const date = new Date(Date.UTC(y, m - 1, d));
+                    const monthName = date.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' });
+                    const dayStr = String(d).padStart(2, '0');
+                    return `${monthName} ${dayStr}, ${y}`;
+                }
+            }
+
+            const parsed = new Date(dateStr);
+            if (!isNaN(parsed.getTime())) {
+                const monthName = parsed.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' });
+                const dayStr = String(parsed.getUTCDate()).padStart(2, '0');
+                return `${monthName} ${dayStr}, ${parsed.getUTCFullYear()}`;
+            }
+
+            return dateStr;
+        }
+
         Papa.parse("data.csv", {
             download: true,
             header: true,
@@ -137,21 +167,20 @@
             timeline.innerHTML = '';
 
             if (currentMode === 'flat') {
-                // In flat mode, group consecutive entries that share the exact same date to share a left-side date label
                 let lastDate = null;
                 let currentRow = null;
                 let currentContainer = null;
 
                 globalData.forEach(item => {
-                    const itemDate = item.Date || "Unknown";
+                    const rawDate = item.Date || "Unknown";
 
-                    if (itemDate !== lastDate) {
+                    if (rawDate !== lastDate) {
                         currentRow = document.createElement('div');
                         currentRow.className = 'timeline-row';
 
                         const dateEl = document.createElement('div');
                         dateEl.className = 'timeline-date';
-                        dateEl.textContent = itemDate;
+                        dateEl.textContent = formatDate(rawDate);
 
                         currentContainer = document.createElement('div');
                         currentContainer.className = 'entry-container';
@@ -160,13 +189,12 @@
                         currentRow.appendChild(currentContainer);
                         timeline.appendChild(currentRow);
 
-                        lastDate = itemDate;
+                        lastDate = rawDate;
                     }
 
                     currentContainer.appendChild(createEntryElement(item, false));
                 });
             } else {
-                // Group by date view
                 const groups = {};
                 globalData.forEach(item => {
                     const dateKey = item.Date || "Unknown Date";
@@ -174,14 +202,14 @@
                     groups[dateKey].push(item);
                 });
 
-                for (const [date, items] of Object.entries(groups)) {
+                for (const [dateKey, items] of Object.entries(groups)) {
                     const dateBlock = document.createElement('details');
                     dateBlock.className = 'date-group';
                     dateBlock.open = true; 
                     
                     const summary = document.createElement('summary');
                     summary.className = 'date-summary';
-                    summary.textContent = date;
+                    summary.textContent = formatDate(dateKey);
                     
                     const container = document.createElement('div');
                     container.className = 'entry-container';
@@ -207,15 +235,18 @@
             entry.style.setProperty('--type-color', baseColor);
             entry.style.setProperty('--type-bg-color', baseColor + '1A');
 
+            // Order hierarchy: Act -> Volume -> Chapter -> Episodes
             let extraContext = [];
+            if (item.Act) extraContext.push(`Act ${item.Act}`);
             if (item.Volume) extraContext.push(`Vol ${item.Volume}`);
             if (item.Chapter) extraContext.push(`Ch ${item.Chapter}`);
             if (item.Eps) extraContext.push(`Ep ${item.Eps}`);
+
             const contextStr = extraContext.length > 0 ? `<span class="sub-meta">(${extraContext.join(', ')})</span>` : '';
             const notesContent = item.Notes ? item.Notes : '<em>No notes available.</em>';
             
-            // If in grouped mode, keep the date in the summary since the left-hand column isn't used there
-            const dateStr = omitDateInMeta ? `[${item.Date}] - ` : '';
+            const formattedDate = formatDate(item.Date);
+            const dateStr = omitDateInMeta ? `[${formattedDate}] - ` : '';
 
             entry.innerHTML = `
                 <details>
@@ -240,7 +271,6 @@
             });
 
             if (currentMode === 'flat') {
-                // Hide entire timeline rows if all entries inside them are filtered out
                 const rows = document.querySelectorAll('.timeline-row');
                 rows.forEach(row => {
                     const visibleEntries = row.querySelectorAll('.entry[style*="display: block"]');
