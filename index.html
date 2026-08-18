@@ -18,13 +18,14 @@
             cursor: pointer; border-radius: 4px; transition: opacity 0.2s; opacity: 0.5;
         }
         .filters button.active { opacity: 1; border-width: 2px; font-weight: bold; }
-        #btn-toggle-all { background: #333; border-color: #777; opacity: 1; }
+        #btn-toggle-all, #btn-toggle-groups { background: #333; border-color: #777; opacity: 1; }
+        #btn-toggle-groups { display: none; margin-left: auto; }
 
         /* Timeline Layout with Left-Side Dates */
         .timeline { padding-top: 10px; }
         .timeline-row { 
             display: grid; 
-            grid-template-columns: 150px 1fr; 
+            grid-template-columns: 140px 1fr; 
             gap: 20px; 
             margin-bottom: 15px; 
             align-items: start; 
@@ -35,7 +36,7 @@
             font-size: 0.85em; 
             text-align: right; 
             padding-top: 12px; 
-            font-family: monospace; 
+            font-family: sans-serif; 
             white-space: nowrap;
         }
 
@@ -61,17 +62,47 @@
             border-radius: 6px; 
             border: 1px solid var(--type-color, #444); 
         }
-        summary { font-weight: bold; cursor: pointer; outline: none; }
+        summary { cursor: pointer; outline: none; display: flex; justify-content: space-between; align-items: flex-start; }
         
-        .meta { font-size: 0.85em; color: #aaa; margin-left: 10px; }
+        .summary-content { flex-grow: 1; }
+        .vol-header { font-size: 0.85em; color: #aaa; font-weight: normal; margin-bottom: 2px; }
+        .chapter-title { font-weight: bold; font-size: 1.05em; }
+
+        .meta { font-size: 0.85em; color: #aaa; white-space: nowrap; margin-left: 10px; }
         .type-badge { color: var(--type-color, #aaa); }
         .sub-meta { font-weight: normal; color: #888; }
-        .content { margin-top: 10px; line-height: 1.5; white-space: pre-wrap; color: #ccc; }
+        .content { margin-top: 10px; line-height: 1.5; white-space: pre-wrap; color: #ccc; border-top: 1px solid #444; padding-top: 8px; }
 
         /* Grouped View Specifics */
         .date-group { margin-bottom: 20px; background: transparent; border: none; padding: 0; }
-        .date-summary { font-size: 1.1em; color: #fff; border-bottom: 1px solid #444; padding-bottom: 5px; margin-bottom: 15px; background: none; border: none; }
-        .date-summary::marker { color: #888; }
+        .date-summary { 
+            font-size: 1.1em; 
+            color: #fff; 
+            border-bottom: 1px solid #444; 
+            padding-bottom: 5px; 
+            margin-bottom: 15px; 
+            background: none; 
+            border: none; 
+            font-weight: bold; 
+            cursor: pointer;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 10px;
+        }
+        .date-summary::-webkit-details-marker { display: none; }
+        .date-summary::before {
+            content: '▶';
+            font-size: 0.75em;
+            color: #888;
+            transition: transform 0.2s ease;
+        }
+        .date-group[open] > .date-summary::before {
+            transform: rotate(90deg);
+        }
+        
+        .error-msg { color: #ff6b6b; padding: 15px; background: #331111; border: 1px solid #882222; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -85,68 +116,105 @@
     </div>
 
     <div class="filters" id="filters">
-        <button id="btn-toggle-all">Toggle All</button>
-        <!-- Filter buttons injected here -->
+        <button id="btn-toggle-all">Toggle All Types</button>
+        <button id="btn-toggle-groups">Collapse All Dates</button>
     </div>
 
-    <div class="timeline" id="timeline">
-        <!-- Entries injected here -->
-    </div>
+    <div class="timeline" id="timeline"></div>
 
     <script>
         let globalData = [];
         let activeTypes = new Set();
         let typeColors = {};
-        let currentMode = 'flat';
+        let currentMode = document.querySelector('input[name="viewMode"]:checked') 
+            ? document.querySelector('input[name="viewMode"]:checked').value 
+            : 'flat';
 
         const palette = ['#007bff', '#28a745', '#dc3545', '#ffc107', '#17a2b8', '#e83e8c', '#fd7e14', '#6610f2', '#20c997'];
 
-        // Helper to format dates to "January 01, 2026"
-        function formatDate(dateStr) {
-            if (!dateStr) return '';
-            const parts = dateStr.trim().split(/[-/.]/);
+        function formatDate(dateString) {
+            if (!dateString || typeof dateString !== 'string') return "Unknown Date";
+            const str = dateString.trim();
+            if (!str) return "Unknown Date";
             
-            let y, m, d;
+            const parts = str.split(/[\/\-]/);
             if (parts.length === 3) {
-                if (parts[0].length === 4) {
-                    [y, m, d] = parts.map(Number);
-                } else if (parts[2].length === 4) {
-                    [m, d, y] = parts.map(Number);
-                }
-                if (y && m && d && !isNaN(y) && !isNaN(m) && !isNaN(d)) {
-                    const date = new Date(Date.UTC(y, m - 1, d));
-                    const monthName = date.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' });
-                    const dayStr = String(d).padStart(2, '0');
-                    return `${monthName} ${dayStr}, ${y}`;
+                let yearVal = parseInt(parts[0], 10);
+                if (!isNaN(yearVal)) {
+                    let year = yearVal < 100 ? 2000 + yearVal : yearVal;
+                    let month = parseInt(parts[1], 10) - 1;
+                    let day = parseInt(parts[2], 10);
+                    
+                    const dateObj = new Date(year, month, day);
+                    if (!isNaN(dateObj.getTime())) {
+                        return dateObj.toLocaleDateString('en-US', { month: 'long', day: '2-digit', year: 'numeric' });
+                    }
                 }
             }
 
-            const parsed = new Date(dateStr);
-            if (!isNaN(parsed.getTime())) {
-                const monthName = parsed.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' });
-                const dayStr = String(parsed.getUTCDate()).padStart(2, '0');
-                return `${monthName} ${dayStr}, ${parsed.getUTCFullYear()}`;
-            }
-
-            return dateStr;
+            const parsed = new Date(str);
+            if (isNaN(parsed.getTime())) return str;
+            return parsed.toLocaleDateString('en-US', { month: 'long', day: '2-digit', year: 'numeric' });
         }
 
         Papa.parse("data.csv", {
             download: true,
             header: true,
-            skipEmptyLines: true,
+            skipEmptyLines: 'greedy',
+            transformHeader: function(header) {
+                return header.trim();
+            },
             complete: function(results) {
-                globalData = results.data.filter(item => item.Name);
-                globalData.sort((a, b) => (a.Date || "").localeCompare(b.Date || ""));
+                if (!results.data || results.data.length === 0) {
+                    showError("data.csv parsed, but returned no rows.");
+                    return;
+                }
+
+                globalData = results.data.filter(item => {
+                    return Object.values(item).some(val => val && String(val).trim() !== "");
+                });
+
+                if (globalData.length === 0) {
+                    showError("No valid records found in data.csv.");
+                    return;
+                }
+
+                globalData.sort((a, b) => {
+                    const dateA = (a.Date || a.PDate || "").trim();
+                    const dateB = (b.Date || b.PDate || "").trim();
+                    return dateA.localeCompare(dateB);
+                });
                 
                 setupState();
                 renderTimeline();
+            },
+            error: function(err) {
+                showError("Failed to load data.csv. Verify the file exists in the directory and the Python web server is active.");
             }
         });
 
+        function showError(msg) {
+            document.getElementById('timeline').innerHTML = `<div class="error-msg">${msg}</div>`;
+        }
+
         function setupState() {
             const filterContainer = document.getElementById('filters');
-            const types = [...new Set(globalData.map(item => item.Type).filter(Boolean))].sort();
+            const groupToggleBtn = document.getElementById('btn-toggle-groups');
+            
+            filterContainer.querySelectorAll('.filter-btn').forEach(b => b.remove());
+
+            const types = [...new Set(globalData.map(item => (item.Type || "").trim()).filter(Boolean))];
+            
+            // Custom sort order: S, E, M, G first, then alphabetical for any others
+            const customOrder = ['S', 'E', 'M', 'G'];
+            types.sort((a, b) => {
+                let indexA = customOrder.indexOf(a);
+                let indexB = customOrder.indexOf(b);
+                if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+                if (indexA !== -1) return -1;
+                if (indexB !== -1) return 1;
+                return a.localeCompare(b);
+            });
 
             types.forEach((type, index) => {
                 activeTypes.add(type);
@@ -158,7 +226,8 @@
                 btn.className = 'active filter-btn';
                 btn.style.borderColor = typeColors[type];
                 btn.style.color = typeColors[type];
-                filterContainer.appendChild(btn);
+                
+                filterContainer.insertBefore(btn, groupToggleBtn);
             });
         }
 
@@ -166,13 +235,17 @@
             const timeline = document.getElementById('timeline');
             timeline.innerHTML = '';
 
+            const groupToggleBtn = document.getElementById('btn-toggle-groups');
+
             if (currentMode === 'flat') {
+                groupToggleBtn.style.display = 'none';
                 let lastDate = null;
                 let currentRow = null;
                 let currentContainer = null;
 
                 globalData.forEach(item => {
-                    const rawDate = item.Date || "Unknown";
+                    const rawDate = (item.Date || item.PDate || "").trim();
+                    const formattedDate = formatDate(rawDate);
 
                     if (rawDate !== lastDate) {
                         currentRow = document.createElement('div');
@@ -180,7 +253,7 @@
 
                         const dateEl = document.createElement('div');
                         dateEl.className = 'timeline-date';
-                        dateEl.textContent = formatDate(rawDate);
+                        dateEl.textContent = formattedDate;
 
                         currentContainer = document.createElement('div');
                         currentContainer.className = 'entry-container';
@@ -195,21 +268,24 @@
                     currentContainer.appendChild(createEntryElement(item, false));
                 });
             } else {
+                groupToggleBtn.style.display = 'block';
+                groupToggleBtn.textContent = "Collapse All Dates";
+
                 const groups = {};
                 globalData.forEach(item => {
-                    const dateKey = item.Date || "Unknown Date";
+                    const dateKey = (item.Date || item.PDate || "").trim() || "Unknown Date";
                     if (!groups[dateKey]) groups[dateKey] = [];
                     groups[dateKey].push(item);
                 });
 
-                for (const [dateKey, items] of Object.entries(groups)) {
+                for (const [date, items] of Object.entries(groups)) {
                     const dateBlock = document.createElement('details');
                     dateBlock.className = 'date-group';
                     dateBlock.open = true; 
                     
                     const summary = document.createElement('summary');
                     summary.className = 'date-summary';
-                    summary.textContent = formatDate(dateKey);
+                    summary.textContent = formatDate(date);
                     
                     const container = document.createElement('div');
                     container.className = 'entry-container';
@@ -229,30 +305,38 @@
         function createEntryElement(item, omitDateInMeta) {
             const entry = document.createElement('div');
             entry.className = 'entry';
-            entry.dataset.type = item.Type;
+            const itemType = (item.Type || "Uncategorized").trim();
+            entry.dataset.type = itemType;
             
-            const baseColor = typeColors[item.Type] || '#777777';
+            const baseColor = typeColors[itemType] || '#777777';
             entry.style.setProperty('--type-color', baseColor);
             entry.style.setProperty('--type-bg-color', baseColor + '1A');
 
-            // Order hierarchy: Act -> Volume -> Chapter -> Episodes
             let extraContext = [];
-            if (item.Act) extraContext.push(`Act ${item.Act}`);
-            if (item.Volume) extraContext.push(`Vol ${item.Volume}`);
-            if (item.Chapter) extraContext.push(`Ch ${item.Chapter}`);
+            if (item['Act#']) extraContext.push(`Act ${item['Act#']}`);
+            if (item['Vol#']) extraContext.push(`Vol ${item['Vol#']}`);
+            if (item['Ch#']) extraContext.push(`Ch ${item['Ch#']}`);
             if (item.Eps) extraContext.push(`Ep ${item.Eps}`);
-
+            
             const contextStr = extraContext.length > 0 ? `<span class="sub-meta">(${extraContext.join(', ')})</span>` : '';
             const notesContent = item.Notes ? item.Notes : '<em>No notes available.</em>';
             
-            const formattedDate = formatDate(item.Date);
-            const dateStr = omitDateInMeta ? `[${formattedDate}] - ` : '';
+            const chapterTitle = item.ChName || item.VolName || item.Type || "Untitled";
+            const volumeName = (item.ChName && item.VolName) ? item.VolName : '';
+            
+            const activeDate = item.Date || item.PDate || "";
+            const dateStr = omitDateInMeta ? `[${formatDate(activeDate)}] - ` : '';
+
+            const volHeaderHtml = volumeName ? `<div class="vol-header">${volumeName}</div>` : '';
 
             entry.innerHTML = `
                 <details>
                     <summary>
-                        ${item.Name} ${contextStr} 
-                        <span class="meta">${dateStr}<span class="type-badge">${item.Type}</span></span>
+                        <div class="summary-content">
+                            ${volHeaderHtml}
+                            <div class="chapter-title">${chapterTitle} ${contextStr}</div>
+                        </div>
+                        <div class="meta">${dateStr}<span class="type-badge">${itemType}</span></div>
                     </summary>
                     <div class="content">${notesContent}</div>
                 </details>
@@ -300,6 +384,18 @@
                     });
                 }
                 applyFilters();
+                return;
+            }
+
+            if (e.target.id === 'btn-toggle-groups') {
+                const groups = document.querySelectorAll('.date-group');
+                const shouldOpen = e.target.textContent === "Expand All Dates";
+                
+                groups.forEach(group => {
+                    group.open = shouldOpen;
+                });
+
+                e.target.textContent = shouldOpen ? "Collapse All Dates" : "Expand All Dates";
                 return;
             }
 
